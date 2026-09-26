@@ -1,0 +1,14 @@
+[tasks.install]
+description = "cmd 以下の CLI をビルドして ~/.local/bin に置き、zsh の補完を書き出す"
+# 補完はシェルの起動のたびに CLI を実行せず、ここで1つのファイルに書き出して source させる。
+# 途中で失敗したら、前回のファイルを残して止める
+run = [
+  'GOBIN="$HOME/.local/bin" go install ./cmd/...',
+  '''
+  set -e
+  out="${XDG_DATA_HOME:-$HOME/.local/share}/cli-kit"
+  mkdir -p "$out"
+  for d in cmd/*/; do "$HOME/.local/bin/$(basename "$d")" completion zsh; done > "$out/completions.zsh.tmp"
+  mv "$out/completions.zsh.tmp" "$out/completions.zsh"
+  ''',
+]
