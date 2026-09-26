@@ -37,14 +37,22 @@ source "${XDG_DATA_HOME:-$HOME/.local/share}/cli-kit/completions.zsh"
 
 ## CI での使い方
 
-モジュール名はリポジトリの場所を含まないため、`go install <URL>@main` では入れられない。CI ではこのリポジトリを取得し、その中で入れる。取得するリポジトリの名前は、CI 側の設定（GitHub Actions の変数など）で参照する。
+モジュール名はリポジトリの場所を含まないため、`go install <URL>@main` では入れられない。CI ではこのリポジトリを取得し、その中でビルドする。取得するリポジトリの名前は、使う側のワークフローの `env` に書く（git で管理でき、名前を変えたときに検索で見つけられる）。
 
 ```yaml
-- uses: actions/checkout@v7
-  with:
-    repository: ${{ vars.CLI_KIT_REPO }}
-    path: cli-kit
-- run: cd cli-kit && go install ./cmd/pdocs
+env:
+  CLI_KIT_REPO: <owner>/<このリポジトリ>
+
+steps:
+  - uses: actions/checkout@v7
+    with:
+      repository: ${{ env.CLI_KIT_REPO }}
+      path: .cli-kit
+  - uses: actions/setup-go@v7
+    with:
+      go-version-file: .cli-kit/go.mod
+  - run: go build -o "$RUNNER_TEMP/pdocs" ./cmd/pdocs
+    working-directory: .cli-kit
 ```
 
 pdocs を変えて CI が落ちたら、pdocs か文書のどちらかを直す合図として扱う。
