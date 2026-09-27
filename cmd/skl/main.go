@@ -1,9 +1,4 @@
-// skl は、dotfiles（chezmoi）で管理する Skill を扱う。
-//
-//	skl list            カテゴリごとに、スキル名と用途を一覧で表示する
-//	skl completion zsh  zsh の補完スクリプトを出力する
-//
-// 各 SKILL.md の frontmatter にある metadata.category と metadata.summary を読む。
+// skl は、dotfiles（chezmoi）で管理する Skill を一覧で表示する。使い方は README.md。
 package main
 
 import (
@@ -16,7 +11,9 @@ import (
 	"slices"
 	"strings"
 
-	"cli-kit/internal/complete"
+	"github.com/spf13/cobra"
+
+	"cli-kit/internal/cli"
 	"cli-kit/internal/ui"
 )
 
@@ -25,41 +22,15 @@ var categories = []string{"仕様書運用", "レビュー・監査", "開発", 
 
 const uncategorized = "未分類"
 
-const usage = `使い方: skl <コマンド>
-
-コマンド:
-  list            カテゴリごとに、スキル名と用途を一覧で表示する
-  completion zsh  zsh の補完スクリプトを出力する`
-
-var spec = complete.Spec{
-	Program: "skl",
-	Commands: []complete.Command{
-		{Name: "list", Description: "カテゴリごとに、スキル名と用途を一覧で表示する"},
-		{Name: "completion", Description: "zsh の補完スクリプトを出力する", Args: []string{"1:シェル:(zsh)"}},
-	},
-}
-
 func main() {
-	if len(os.Args) == 3 && os.Args[1] == "completion" && os.Args[2] == "zsh" {
-		fmt.Print(spec.Zsh())
-		return
-	}
-	if len(os.Args) != 2 {
-		fmt.Fprintln(os.Stderr, usage)
-		os.Exit(2)
-	}
-	switch os.Args[1] {
-	case "list":
-		if err := list(); err != nil {
-			fmt.Fprintf(os.Stderr, "skl: %v\n", err)
-			os.Exit(1)
-		}
-	case "-h", "--help", "help":
-		fmt.Println(usage)
-	default:
-		fmt.Fprintf(os.Stderr, "skl: 不明なコマンド「%s」\n\n%s\n", os.Args[1], usage)
-		os.Exit(2)
-	}
+	root := cli.Root("skl", "dotfiles（chezmoi）で管理する Skill を扱う", "")
+	root.AddCommand(&cobra.Command{
+		Use:   "list",
+		Short: "カテゴリごとに、スキル名と用途を一覧で表示する",
+		Args:  cli.NoArgs,
+		RunE:  func(c *cobra.Command, args []string) error { return list() },
+	})
+	cli.Execute(root)
 }
 
 type skill struct {
