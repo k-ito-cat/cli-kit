@@ -12,3 +12,7 @@ run = [
   mv "$out/completions.zsh.tmp" "$out/completions.zsh"
   ''',
 ]
+
+[tasks.test]
+description = "すべてのテストを実行する"
+run = "go test ./..."

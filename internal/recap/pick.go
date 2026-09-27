@@ -1,11 +1,4 @@
-// git-today は、今日のコミットで変わったファイルをリポジトリ横断で選び、差分・yazi・今のファイルの中身で開く。
-// PATH 上の git-<name> は git <name> として呼べるので、git today として使う。
-//
-// fzf で「ファイル → 開き方」の順に選ぶ。操作は Enter だけで、Esc で1つ前に戻る。
-// 一覧の各コミットの先頭には、コミット全体を差分で開くための行を置く。
-// 対象は ghq が管理するリポジトリと、dotfiles（chezmoi の管理元）。
-// git-today completion zsh で、git today を git の補完の候補に加える設定を出力する。
-package main
+package recap
 
 import (
 	"bytes"
@@ -14,37 +7,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"slices"
 	"strings"
-	"sync"
 	"time"
-
-	"cli-kit/internal/complete"
 )
-
-func main() {
-	if len(os.Args) == 3 && os.Args[1] == "completion" && os.Args[2] == "zsh" {
-		fmt.Print(complete.GitUserCommand("today", "今日のコミットで変わったファイルを選び、差分・yazi・中身で開く"))
-		return
-	}
-	// fzf のプレビューから呼ぶ。シェルの if 文で組み立てず、ここで出し分ける
-	if len(os.Args) == 5 && os.Args[1] == "__preview" {
-		if err := preview(os.Args[2], os.Args[3], os.Args[4]); err != nil {
-			fmt.Printf("プレビューに失敗: %v\n", err)
-		}
-		return
-	}
-	// 知らない引数で fzf を起動しないよう、引数があれば止める
-	if len(os.Args) > 1 {
-		fmt.Fprintln(os.Stderr, "使い方: git today\n       git-today completion zsh")
-		os.Exit(2)
-	}
-	if err := run(); err != nil {
-		fmt.Fprintf(os.Stderr, "git-today: %v\n", err)
-		os.Exit(1)
-	}
-}
 
 // wholeCommit は、ファイルの代わりに置く「コミット全体」を表す行。
 const wholeCommit = "（コミット全体）"
@@ -52,9 +18,11 @@ const wholeCommit = "（コミット全体）"
 // change は一覧の1行。file が wholeCommit ならコミット全体を表す。
 type change struct {
 	repo, hash, subject, file string
-	time                      string // コミットの時刻（HH:MM）
-	status                    string // ファイルの変更の種類（A 追加・M 更新・D 削除・R 名前の変更など）
-	last                      bool   // コミットの中で最後のファイルか（入れ子の枝の形を決める）
+	time                      string    // 一覧に出すコミットの時刻
+	at                        time.Time // コミットの時刻（committer date）。要約済みかの判定に使う
+	body                      string    // コミットの本文（コミットの行だけ）。要約の材料に使う
+	status                    string    // ファイルの変更の種類（A 追加・M 更新・D 削除・R 名前の変更など）
+	last                      bool      // コミットの中で最後のファイルか（入れ子の枝の形を決める）
 }
 
 // statusColors は、変更の種類の印の色（ANSI）。ここに無い種類は薄く出す。
@@ -100,118 +68,8 @@ func (c change) git(args ...string) *exec.Cmd {
 	return exec.Command("git", append([]string{"-C", c.repo}, args...)...)
 }
 
-func run() error {
-	repos, err := repositories()
-	if err != nil {
-		return err
-	}
-	since := time.Now().Format("2006-01-02") + " 00:00:00"
-	changes := todayChanges(repos, since)
-	if len(changes) == 0 {
-		return nil
-	}
-	lines := make([]string, len(changes))
-	for i, c := range changes {
-		lines[i] = c.line()
-	}
-
-	for {
-		c, ok, err := pickChange(lines)
-		if err != nil || !ok {
-			return err
-		}
-		// コミット全体と、今の作業ツリーにないファイル（削除したものなど）は、差分でしか開けない
-		onlyDiff := c.file == wholeCommit || !exists(filepath.Join(c.repo, c.file))
-		v, ok, err := pickViewer(onlyDiff)
-		if err != nil {
-			return err
-		}
-		if !ok {
-			continue // ファイルの選択に戻る
-		}
-		return v.open(c)
-	}
-}
-
-func repositories() ([]string, error) {
-	out, err := exec.Command("ghq", "list", "--full-path").Output()
-	if err != nil {
-		return nil, fmt.Errorf("ghq list に失敗: %w", err)
-	}
-	source, err := exec.Command("chezmoi", "source-path").Output()
-	if err != nil {
-		return nil, fmt.Errorf("chezmoi source-path に失敗: %w", err)
-	}
-	var repos []string
-	for line := range strings.Lines(string(out)) {
-		if repo := strings.TrimRight(line, "\n"); repo != "" {
-			repos = append(repos, repo)
-		}
-	}
-	return append(repos, strings.TrimSpace(string(source))), nil
-}
-
-// commitMark は、git log の出力でコミットの始まりを示す印。ファイル名には現れない制御文字を使う。
-const commitMark = "\x1e"
-
-// todayChanges はリポジトリを並列に調べ、今日のコミットごとに「コミット全体」と変わったファイルを返す。
-// 並びはリポジトリの順、その中はコミットの新しい順。git log に失敗したリポジトリ（取得途中など）は飛ばす。
-func todayChanges(repos []string, since string) []change {
-	results := make([][]change, len(repos))
-	sem := make(chan struct{}, runtime.NumCPU())
-	var wg sync.WaitGroup
-	for i, repo := range repos {
-		wg.Go(func() {
-			sem <- struct{}{}
-			defer func() { <-sem }()
-			out, err := exec.Command("git", "-C", repo, "log", "--all", "--since="+since,
-				"--name-status", "--date=format:%H:%M", "--format="+commitMark+"%h\t%ad\t%s").Output()
-			if err != nil {
-				return
-			}
-			var cur *change
-			for l := range strings.Lines(string(out)) {
-				l = strings.TrimRight(l, "\n")
-				switch {
-				case strings.HasPrefix(l, commitMark):
-					f := strings.SplitN(strings.TrimPrefix(l, commitMark), "\t", 3)
-					if len(f) != 3 {
-						cur = nil
-						continue
-					}
-					cur = &change{repo: repo, hash: f[0], time: f[1], subject: f[2], file: wholeCommit}
-					results[i] = append(results[i], *cur)
-				case l != "" && cur != nil:
-					// 「種類<TAB>パス」。名前の変更とコピーは「R100<TAB>元<TAB>先」なので、最後のパスを使う
-					fields := strings.Split(l, "\t")
-					if len(fields) < 2 {
-						continue
-					}
-					f := *cur
-					f.status = fields[0][:1]
-					f.file = fields[len(fields)-1]
-					results[i] = append(results[i], f)
-				}
-			}
-			// 各コミットの最後のファイルに印を付ける（次がコミットの行か、一覧の終わり）
-			r := results[i]
-			for j := range r {
-				if r[j].file != wholeCommit && (j == len(r)-1 || r[j+1].file == wholeCommit) {
-					r[j].last = true
-				}
-			}
-		})
-	}
-	wg.Wait()
-
-	var changes []change
-	for _, r := range results {
-		changes = append(changes, r...)
-	}
-	return changes
-}
-
-func pickChange(lines []string) (change, bool, error) {
+// pickChange は、一覧からファイル（またはコミット全体）を選ばせる。label は一覧の枠の見出し（対象の期間）。
+func pickChange(lines []string, label string) (change, bool, error) {
 	self, err := os.Executable()
 	if err != nil {
 		return change{}, false, err
@@ -219,7 +77,7 @@ func pickChange(lines []string) (change, bool, error) {
 	selected, ok, err := fzf(lines,
 		"--delimiter=\t",
 		"--with-nth=1",
-		"--list-label= 今日の変更 ",
+		"--list-label= "+label+" ",
 		"--preview-label= 差分 ",
 		"--header=コミットの行を選ぶとコミット全体 · Enter 次へ · Esc 終わる",
 		"--preview="+shellQuote(self)+" __preview {2} {3} {4}",
