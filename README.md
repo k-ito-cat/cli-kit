@@ -8,7 +8,7 @@
 |---|---|
 | `pdocs stat` / `check` / `id` | project-documents の文書の記入漏れとルールからの逸脱を早く見つけ、形骸化を防ぐ（`pdocs --help`） |
 | `skl list` | dotfiles（chezmoi）で管理する Skill を、カテゴリごとに一覧で表示する |
-| `git today` | 今日のコミットをリポジトリ横断で選び、hunk で表示する |
+| `git today` | 今日のコミットで変わったファイルをリポジトリ横断で選び、差分（hunk）・yazi・今のファイルの中身（bat）で開く |
 
 ## 入れ方と更新
 
