@@ -99,7 +99,8 @@ func Main() {
 		"自分のコミットをリポジトリ横断で振り返る",
 		"今日・直近7日の自分のコミットで変わったファイルを選んで開く。--summary で、まだ要約していないコミットの要点を AI にまとめさせ、記録に追記する。\n"+
 			"設定: "+configPath())
-	root.AddCommand(periodCmd(today), periodCmd(week), logCmd(), previewCmd())
+	cli.ColorFlag(root)
+	root.AddCommand(periodCmd(today), periodCmd(week), logCmd(), statusCmd(), configCmd(), previewCmd())
 	cli.Execute(root)
 }
 

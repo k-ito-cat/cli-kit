@@ -148,12 +148,12 @@ func localize(root *cobra.Command) {
 	root.InitDefaultCompletionCmd()
 	var walk func(c *cobra.Command)
 	walk = func(c *cobra.Command) {
-		// 使い方の行に英語の [flags] を付けず、日本語で書く
+		c.InitDefaultHelpFlag()
+		// 使い方の行に英語の [flags] を付けず、日本語で書く。-h を足したあとに判定する
 		if !c.DisableFlagsInUseLine && c.HasAvailableFlags() {
 			c.DisableFlagsInUseLine = true
 			c.Use += " [オプション]"
 		}
-		c.InitDefaultHelpFlag()
 		if f := c.Flags().Lookup("help"); f != nil {
 			f.Usage = "使い方を表示する"
 		}

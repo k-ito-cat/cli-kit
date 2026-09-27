@@ -114,6 +114,9 @@ func summarize(cfg config, p period, sp span, changes []change, deep, force bool
 	}
 	footer = append(footer, ui.Paint(ui.Muted, "記録: "+logFile))
 	blocks = append(blocks, ui.Footer(footer...))
+	if w := dirtyWarning(cfg); w != "" {
+		blocks = append(blocks, w)
+	}
 	ui.Println(ui.Blocks(blocks...))
 	return nil
 }
